@@ -82,7 +82,7 @@
 
   });
 
-  test('Two.makePolygon', 1, function(o) {
+  test('Two.makePath', 1, function(o) {
 
     var two = new Two({
       width: 400,
@@ -97,13 +97,13 @@
       var y = i % 2 ? 25 : 75;
       return new Two.Vector(x, y);
     });
-    var poly = two.makePolygon(points, true);
+    var poly = two.makePath(points, true);
 
     two.update();
 
     var elem = two.renderer.domElement.querySelector('#' + poly.id);
 
-    equal(elem.getAttribute('d'), 'M -142.5 25 L -127.5 -25 L -112.5 25 L -97.5 -25 L -82.5 25 L -67.5 -25 L -52.5 25 L -37.5 -25 L -22.5 25 L -7.5 -25 L 7.5 25 L 22.5 -25 L 37.5 25 L 52.5 -25 L 67.5 25 L 82.5 -25 L 97.5 25 L 112.5 -25 L 127.5 25 L 142.5 -25 ', 'Two.makePolygon applies d attribute properly.');
+    equal(elem.getAttribute('d'), 'M -142.5 25 L -127.5 -25 L -112.5 25 L -97.5 -25 L -82.5 25 L -67.5 -25 L -52.5 25 L -37.5 -25 L -22.5 25 L -7.5 -25 L 7.5 25 L 22.5 -25 L 37.5 25 L 52.5 -25 L 67.5 25 L 82.5 -25 L 97.5 25 L 112.5 -25 L 127.5 25 L 142.5 -25 ', 'Two.makePath applies d attribute properly.');
 
     QUnit.Utils.addInstanceToTest(o, two);
 
@@ -135,6 +135,67 @@
     QUnit.Utils.addInstanceToTest(o, two);
 
   });
+
+  test('Two.makeLinearGradient', 7, function(o) {
+
+    var two = new Two({
+      width: 400,
+      height: 400
+    });
+
+    var gradient = two.makeLinearGradient(0, - two.height / 2, 0, two.height / 2,
+      new Two.Gradient.Stop(0, 'rgb(255, 100, 100)'), new Two.Gradient.Stop(1, 'rgb(100, 100, 255)'));
+
+    var rect = two.makeRectangle(two.width / 2, two.height / 2, two.width / 4, two.height / 4);
+    rect.fill = gradient;
+
+    two.update();
+
+    var elem = two.renderer.domElement.querySelector('#' + gradient.id);
+
+    equal(parseFloat(elem.getAttribute('x1')), 0);
+    equal(parseFloat(elem.getAttribute('y1')), -200);
+    equal(parseFloat(elem.getAttribute('x2')), 0);
+    equal(parseFloat(elem.getAttribute('y2')), 200);
+    equal(elem.getAttribute('spreadMethod'), 'pad');
+    equal(elem.getAttribute('gradientUnits'), 'userSpaceOnUse');
+    equal(elem.innerHTML, '<stop offset="0%" stop-color="rgb(255, 100, 100)" stop-opacity="1"></stop><stop offset="100%" stop-color="rgb(100, 100, 255)" stop-opacity="1"></stop>');
+
+    QUnit.Utils.addInstanceToTest(o, two);
+
+  });
+
+
+  test('Two.makeRadialGradient', 8, function(o) {
+
+    var two = new Two({
+      width: 400,
+      height: 400
+    });
+
+    var gradient = two.makeRadialGradient(0, 0, two.width / 2,
+      new Two.Gradient.Stop(0, 'rgb(255, 100, 100)'), new Two.Gradient.Stop(1, 'rgb(100, 100, 255)'));
+
+    var rect = two.makeRectangle(two.width / 2, two.height / 2, two.width / 4, two.height / 4);
+    rect.fill = gradient;
+
+    two.update();
+
+    var elem = two.renderer.domElement.querySelector('#' + gradient.id);
+
+    equal(parseFloat(elem.getAttribute('cx')), 0);
+    equal(parseFloat(elem.getAttribute('cy')), 0);
+    equal(parseFloat(elem.getAttribute('fx')), 0);
+    equal(parseFloat(elem.getAttribute('fy')), 0);
+    equal(parseFloat(elem.getAttribute('r')), 200);
+    equal(elem.getAttribute('spreadMethod'), 'pad');
+    equal(elem.getAttribute('gradientUnits'), 'userSpaceOnUse');
+    equal(elem.innerHTML, '<stop offset="0%" stop-color="rgb(255, 100, 100)" stop-opacity="1"></stop><stop offset="100%" stop-color="rgb(100, 100, 255)" stop-opacity="1"></stop>');
+
+    QUnit.Utils.addInstanceToTest(o, two);
+
+  });
+
 
   test('Styles', 8, function(o) {
 

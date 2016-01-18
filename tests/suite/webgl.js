@@ -4,7 +4,7 @@
 
 (function() {
 
-  module('WebGlRenderer');
+  module('WebGLRenderer');
 
   var getRatio = Two.Utils.getRatio;
   var deviceRatio = getRatio(document.createElement('canvas').getContext('2d'));
@@ -76,7 +76,7 @@
 
   });
 
-  asyncTest('Two.makePolygon', 1, function(o) {
+  asyncTest('Two.makePath', 1, function(o) {
 
     var two = new Two({
       type: Two.Types.webgl,
@@ -92,11 +92,11 @@
       var y = i % 2 ? 25 : 75;
       return new Two.Vector(x, y);
     });
-    var poly = two.makePolygon(points, true);
+    var poly = two.makePath(points, true);
 
     two.update();
 
-    QUnit.Utils.compare.call(o, './images/canvas/polygon' + suffix, two.renderer, 'Two.makePolygon renders properly.');
+    QUnit.Utils.compare.call(o, './images/canvas/polygon' + suffix, two.renderer, 'Two.makePath renders properly.');
 
   });
 
@@ -121,6 +121,46 @@
     two.update();
 
     QUnit.Utils.compare.call(o, './images/canvas/curve' + suffix, two.renderer, 'Two.makeCurve renders properly.');
+
+  });
+
+  asyncTest('Two.makeLinearGradient', 1, function(o) {
+
+    var two = new Two({
+      type: Two.Types.webgl,
+      width: 400,
+      height: 400
+    });
+
+    var gradient = two.makeLinearGradient(0, - two.height / 2, 0, two.height / 2,
+      new Two.Gradient.Stop(0, 'rgb(255, 100, 100)'), new Two.Gradient.Stop(1, 'rgb(100, 100, 255)'));
+
+    var rect = two.makeRectangle(two.width / 2, two.height / 2, two.width / 4, two.height / 4);
+    rect.fill = gradient;
+
+    two.update();
+
+    QUnit.Utils.compare.call(o, './images/canvas/linear-gradient' + suffix, two.renderer, 'Two.makeLinearGradient renders properly.');
+
+  });
+
+  asyncTest('Two.makeRadialGradient', 1, function(o) {
+
+    var two = new Two({
+      type: Two.Types.webgl,
+      width: 400,
+      height: 400
+    });
+
+    var gradient = two.makeRadialGradient(0, 0, two.height / 2,
+      new Two.Gradient.Stop(0, 'rgb(255, 100, 100)'), new Two.Gradient.Stop(1, 'rgb(100, 100, 255)'));
+
+    var rect = two.makeRectangle(two.width / 2, two.height / 2, two.width / 4, two.height / 4);
+    rect.fill = gradient;
+
+    two.update();
+
+    QUnit.Utils.compare.call(o, './images/canvas/radial-gradient' + suffix, two.renderer, 'Two.makeLinearGradient renders properly.');
 
   });
 

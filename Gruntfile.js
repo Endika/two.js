@@ -24,7 +24,17 @@ module.exports = function(grunt) {
         'src/renderer/canvas.js',
         'src/renderer/webgl.js',
         'src/shape.js',
-        'src/polygon.js',
+        'src/path.js',
+        'src/shapes/line.js',
+        'src/shapes/rectangle.js',
+        'src/shapes/ellipse.js',
+        'src/shapes/polygon.js',
+        'src/shapes/sine-ring.js',
+        'src/shapes/star.js',
+        'src/shapes/rounded-rectangle.js',
+        '/src/effects/gradient.js',
+        '/src/effects/linear-gradient.js',
+        '/src/effects/radial-gradient.js',
         'src/group.js'
       ]
     },
@@ -38,11 +48,7 @@ module.exports = function(grunt) {
 
     jshint: {
       options: {
-        laxbreak: true,
-        undef: true,
-        browser: true,
-        '-W009': true,
-        predef: [ "_", "Backbone", "Two", "requestAnimationFrame", "module", "define"]
+        jshintrc: true,
       },
       all: ['Gruntfile.js', 'src/**/*.js']
     },

@@ -2,7 +2,7 @@
 
 A two-dimensional drawing api meant for modern browsers. It is renderer agnostic enabling the same api to render in multiple contexts: webgl, canvas2d, and svg.
 
-[Home](http://jonobr1.github.com/two.js) • [Examples](http://jonobr1.github.com/two.js/#examples) • [Documentation](http://jonobr1.github.com/two.js/#documentation) • [Help](https://github.com/jonobr1/two.js/issues?labels=question)
+[Home](http://jonobr1.github.io/two.js) • [Examples](http://jonobr1.github.io/two.js/#examples) • [Documentation](http://jonobr1.github.io/two.js/#documentation) • [Help](https://github.com/jonobr1/two.js/issues?labels=question)
 
 ## Usage
 Download the [minified library](https://raw.github.com/jonobr1/two.js/master/build/two.min.js) and include it in your html.
@@ -25,6 +25,7 @@ Here is boilerplate html in order to draw a spinning rectangle in two.js:
 <!doctype html>
 <html>
   <head>
+    <meta charset="utf-8">
     <script src="js/two.min.js"></script>
   </head>
   <body>
@@ -50,7 +51,7 @@ Next you'll want to install [grunt](https://npmjs.org/package/grunt):
 cd two.js
 npm install grunt
 ```
-You can edit the files that we be included in the build by modifying ./Gruntfile.js.
+You can edit the files that we be included in the build by modifying `./Gruntfile.js`.
 If you're making an application and you're only using one renderer (i.e: svg context) then it is highly recommended to remove canvas and webgl renderers from your build in order to drastically decrease your file size.
 
 Finally, build the project:
@@ -69,6 +70,22 @@ instead to minify the build with uglify.
 ## Change Log
 For the latest nightly changes checkout the `dev` branch [here](../../tree/dev).
 
+##### October 1, 2015 [v0.5.0](https://github.com/jonobr1/two.js/releases/tag/v0.5.0)
++ Added support for `two.interpret` to import `svg`'s gradients
++ Added `Two.Utils.xhr` and `two.load` methods to asynchronously load SVG files
++ Added `Two.Gradient`, `Two.LinearGradient`, and `Two.RadialGradient`
++ Added dependency check to ensure ASM loading in environments like NPM as well as in the browser
++ Properly deleted `webgl` textures on removal of `Two.Path`
++ Added support for `two.interpret` to import `svg`'s [Elliptical Arcs](http://www.w3.org/TR/SVG/paths.html#PathDataEllipticalArcCommands)
++ Added `Two.ArcSegment` and `Two.SineRing` as new shapes invoked like `Two.Path` [@chrisdelbuck](http://github.com/chrisdelbuck)
++ Added `Two.Line`, `Two.Rectangle`, `Two.RoundedRectangle`, `Two.Ellipse`, `Two.Polygon`, and `Two.Star` as new shapes invoked like `Two.Path`
++ ___Breaking___: renamed `Two.Polygon` to `Two.Path`
++ Performance enhancements to `webgl` renderer
++ Performance enhancements to `canvas` renderer [Leo Koppelkamm](https://github.com/ponychicken)
++ Enabled render ordering in `Two.Group.children` based on previous augmentation
++ Augmented `Two.Group.children` to inherit from `Two.Collection` effectively making it an array instead of a map [Leo Koppelkamm](https://github.com/ponychicken)
+  - The map can still be accessed at `Two.Group.children.ids`
+
 ##### July 22, 2014 [v0.4.0](https://github.com/jonobr1/two.js/releases/tag/v0.4.0)
 + Updated `Two.interpret` to handle polybezier path data
 + Added `Two.Group.mask` and `Two.Polygon.clip` in order to create clipping masks
@@ -85,14 +102,14 @@ For the latest nightly changes checkout the `dev` branch [here](../../tree/dev).
 + Added `Two.Polygon.length` property and `Two.Polygon._updateLength` method to calculate length of curve/line
 + Updated `Two.Group.prototype` observable properties on `Two.Polygon.Properties` to ensure each property is considered unique
 + ~~`Two.Polygon.vertices` first and last vertex create automated control points when `Two.Polygon.curved = true`~~
-+ Updated `Two.Polygon.subdivide` method to accomodate `Two.makeEllipse`
++ Updated `Two.Polygon.subdivide` method to accommodate `Two.makeEllipse`
 + Enabled `id` to be properly interpreted from SVG elements [@chrisdelbuck](http://github.com/chrisdelbuck)
 + Updated `webgl` renderer `getBoundingClientRect` to accommodate `relative` anchors
 + Updated `beginning` and `ending` to clamp to each other
 + Reorganized `Two.Polygon._update` and `Two.Polygon.plot` in order to handle `beginning` and `ending` properties
 + Updated `Two.getComputedMatrix` and `Two.Polygon.getBoundingClientRect` to adhere to nested transformations
 + Updated `Two.Anchor` to change `control` points relatively by default through `anchor.relative` property
-+ Updated `Two.Polygon.subdivide` method to accomodate `curved = false` circumstances
++ Updated `Two.Polygon.subdivide` method to accommodate `curved = false` circumstances
 + Updated `svg`, `canvas`, and `webgl` renderers to properly reflect holes in curved `Two.Polygon`s
 + Updated `Two.Group` `clone` method
 + Added `toObject` method to `Two.Group`, `Two.Polygon`, `Two.Anchor`

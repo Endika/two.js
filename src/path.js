@@ -1,4 +1,4 @@
-(function(Two) {
+(function(Two, _, Backbone, requestAnimationFrame) {
 
   /**
    * Constants
@@ -13,11 +13,11 @@
     commands[k] = new RegExp(v);
   });
 
-  var Polygon = Two.Polygon = function(vertices, closed, curved, manual) {
+  var Path = Two.Path = function(vertices, closed, curved, manual) {
 
     Two.Shape.call(this);
 
-    this._renderer.type = 'polygon';
+    this._renderer.type = 'path';
 
     this._closed = !!closed;
     this._curved = !!curved;
@@ -47,7 +47,7 @@
 
   };
 
-  _.extend(Polygon, {
+  _.extend(Path, {
 
     Properties: [
       'fill',
@@ -77,7 +77,7 @@
 
       // Only the first 8 properties are flagged like this. The subsequent
       // properties behave differently and need to be hand written.
-      _.each(Polygon.Properties.slice(0, 8), function(property) {
+      _.each(Path.Properties.slice(0, 8), function(property) {
 
         var secret = '_' + property;
         var flag = '_flag' + property.charAt(0).toUpperCase() + property.slice(1);
@@ -167,7 +167,7 @@
 
         set: function(vertices) {
 
-          var updateVertices = _.bind(Polygon.FlagVertices, this);
+          var updateVertices = _.bind(Path.FlagVertices, this);
 
           var bindVerts = _.bind(function(items) {
 
@@ -198,7 +198,7 @@
           }
 
           // Create new Collection with copy of vertices
-          this._collection = new Two.Utils.Collection(vertices.slice(0));
+          this._collection = new Two.Utils.Collection((vertices || []).slice(0));
 
           // Listen for Collection changes and bind / unbind
           this._collection.bind(Two.Events.insert, bindVerts);
@@ -225,7 +225,7 @@
 
   });
 
-  _.extend(Polygon.prototype, Two.Shape.prototype, {
+  _.extend(Path.prototype, Two.Shape.prototype, {
 
     // Flags
     // http://en.wikipedia.org/wiki/Flag
@@ -275,9 +275,9 @@
         return v.clone();
       });
 
-      var clone = new Polygon(points, this.closed, this.curved, !this.automatic);
+      var clone = new Path(points, this.closed, this.curved, !this.automatic);
 
-      _.each(Two.Shape.Properties, function(k) {
+      _.each(Two.Path.Properties, function(k) {
         clone[k] = this[k];
       }, this);
 
@@ -323,7 +323,7 @@
 
     /**
      * Orient the vertices of the shape to the upper lefthand
-     * corner of the polygon.
+     * corner of the path.
      */
     corner: function() {
 
@@ -344,7 +344,7 @@
 
     /**
      * Orient the vertices of the shape to the center of the
-     * polygon.
+     * path.
      */
     center: function() {
 
@@ -385,26 +385,31 @@
      * parameters of the group.
      */
     getBoundingClientRect: function(shallow) {
+      var matrix, border, l, x, y, i, v;
+
+      var left = Infinity, right = -Infinity,
+          top = Infinity, bottom = -Infinity;
 
       // TODO: Update this to not __always__ update. Just when it needs to.
       this._update(true);
 
-      var matrix = !!shallow ? this._matrix : getComputedMatrix(this);
+      matrix = !!shallow ? this._matrix : getComputedMatrix(this);
 
-      var border = this.linewidth / 2, x, y;
-      var left = Infinity, right = -Infinity,
-          top = Infinity, bottom = -Infinity;
+      border = this.linewidth / 2;
+      l = this._vertices.length;
 
+      for (i = 0; i < l; i++) {
+        v = this._vertices[i];
 
-      _.each(this._vertices, function(v) {
         x = v.x;
         y = v.y;
-        v = matrix.multiply(x, y , 1);
+
+        v = matrix.multiply(x, y, 1);
         top = min(v.y - border, top);
         left = min(v.x - border, left);
         right = max(v.x + border, right);
         bottom = max(v.y + border, bottom);
-      });
+      }
 
       return {
         top: top,
@@ -419,7 +424,7 @@
 
     /**
      * Given a float `t` from 0 to 1, return a point or assign a passed `obj`'s
-     * coordinates to that percentage on this Two.Polygon's curve.
+     * coordinates to that percentage on this Two.Path's curve.
      */
     getPointAt: function(t, obj) {
       var x, x1, x2, x3, x4, y, y1, y2, y3, y4, left, right;
@@ -643,7 +648,7 @@
 
       }
 
-      Two.Shape.prototype._update.call(this);
+      Two.Shape.prototype._update.apply(this, arguments);
 
       return this;
 
@@ -664,7 +669,7 @@
 
   });
 
-  Polygon.MakeObservable(Polygon.prototype);
+  Path.MakeObservable(Path.prototype);
 
   /**
    * Utility functions
@@ -730,4 +735,9 @@
 
   }
 
-})(Two);
+})(
+  Two,
+  typeof require === 'function' ? require('underscore') : _,
+  typeof require === 'function' ? require('backbone') : Backbone,
+  typeof require === 'function' ? require('requestAnimationFrame') : requestAnimationFrame
+);

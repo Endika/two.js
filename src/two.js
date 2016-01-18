@@ -1,7 +1,6 @@
-(function() {
+(function(previousTwo, _, Backbone, requestAnimationFrame) {
 
   var root = this;
-  var previousTwo = root.Two || {};
 
   /**
    * Constants
@@ -30,6 +29,8 @@
    * Cross browser dom events.
    */
   var dom = {
+
+    temp: document.createElement('div'),
 
     hasEventListeners: _.isFunction(root.addEventListener),
 
@@ -137,7 +138,7 @@
       canvas: 'CanvasRenderer'
     },
 
-    Version: 'v0.4.0',
+    Version: 'v0.5.0',
 
     Identifier: 'two_',
 
@@ -154,7 +155,8 @@
       resize: 'resize',
       change: 'change',
       remove: 'remove',
-      insert: 'insert'
+      insert: 'insert',
+      order: 'order'
     },
 
     Commands: {
@@ -180,6 +182,24 @@
     },
 
     Utils: {
+
+      defineProperty: function(property) {
+
+        var object = this;
+        var secret = '_' + property;
+        var flag = '_flag' + property.charAt(0).toUpperCase() + property.slice(1);
+
+        Object.defineProperty(object, property, {
+          get: function() {
+            return this[secret];
+          },
+          set: function(v) {
+            this[secret] = v;
+            this[flag] = true;
+          }
+        });
+
+      },
 
       /**
        * Release an arbitrary class' events from the two.js corpus and recurse
@@ -211,6 +231,22 @@
             Two.Utils.release(obj);
           });
         }
+
+      },
+
+      xhr: function(path, callback) {
+
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', path);
+
+        xhr.onreadystatechange = function() {
+          if (xhr.readyState === 4 && xhr.status === 200) {
+            callback(xhr.responseText);
+          }
+        };
+
+        xhr.send();
+        return xhr;
 
       },
 
@@ -364,8 +400,12 @@
       /**
        * Walk through item properties and pick the ones of interest.
        * Will try to resolve styles applied via CSS
+       *
+       * TODO: Reverse calculate `Two.Gradient`s for fill / stroke
+       * of any given path.
        */
       applySvgAttributes: function(node, elem) {
+
         var attributes = {}, styles = {}, i, key, value, attr;
 
         // Not available in non browser environments
@@ -374,7 +414,7 @@
           var computedStyles = getComputedStyle(node);
           i = computedStyles.length;
 
-          while(i--) {
+          while (i--) {
             key = computedStyles[i];
             value = computedStyles[key];
             // Gecko returns undefined for unset properties
@@ -387,7 +427,7 @@
 
         // Convert NodeMap to a normal object
         i = node.attributes.length;
-        while(i--) {
+        while (i--) {
           attr = node.attributes[i];
           attributes[attr.nodeName] = attr.value;
         }
@@ -414,6 +454,7 @@
 
           switch (key) {
             case 'transform':
+              // TODO: Check this out https://github.com/paperjs/paper.js/blob/master/src/svg/SVGImport.js#L313
               if (value === 'none') break;
               var m = node.getCTM();
 
@@ -465,7 +506,12 @@
               break;
             case 'fill':
             case 'stroke':
-              elem[key] = (value === 'none') ? 'transparent' : value;
+              if (/url\(\#.*\)/i.test(value)) {
+                elem[key] = this.getById(
+                  value.replace(/url\(\#(.*)\)/i, '$1'));
+              } else {
+                elem[key] = (value === 'none') ? 'transparent' : value;
+              }
               break;
             case 'id':
               elem.id = value;
@@ -494,7 +540,7 @@
           var group = new Two.Group();
 
           // Switched up order to inherit more specific styles
-          Two.Utils.applySvgAttributes(node, group);
+          Two.Utils.applySvgAttributes.call(this, node, group);
 
           for (var i = 0, l = node.childNodes.length; i < l; i++) {
             var n = node.childNodes[i];
@@ -504,7 +550,7 @@
             var tagName = tag.replace(/svg\:/ig, '').toLowerCase();
 
             if (tagName in Two.Utils.read) {
-              var o = Two.Utils.read[tagName].call(this, n);
+              var o = Two.Utils.read[tagName].call(group, n);
               group.add(o);
             }
           }
@@ -522,22 +568,22 @@
             verts.push(new Two.Anchor(parseFloat(p1), parseFloat(p2)));
           });
 
-          var poly = new Two.Polygon(verts, !open).noStroke();
+          var poly = new Two.Path(verts, !open).noStroke();
           poly.fill = 'black';
 
-          return Two.Utils.applySvgAttributes(node, poly);
+          return Two.Utils.applySvgAttributes.call(this, node, poly);
 
         },
 
         polyline: function(node) {
-          return Two.Utils.read.polygon(node, true);
+          return Two.Utils.read.polygon.call(this, node, true);
         },
 
         path: function(node) {
 
           var path = node.getAttribute('d');
 
-          // Create a Two.Polygon from the paths.
+          // Create a Two.Path from the paths.
 
           var coord = new Two.Anchor();
           var control, coords;
@@ -621,7 +667,7 @@
 
           });
 
-          // Create the vertices for our Two.Polygon
+          // Create the vertices for our Two.Path
 
           var points = _.flatten(_.map(commands, function(command, i) {
 
@@ -827,7 +873,114 @@
                 break;
 
               case 'a':
-                throw new Two.Utils.Error('not yet able to interpret Elliptical Arcs.');
+
+                // throw new Two.Utils.Error('not yet able to interpret Elliptical Arcs.');
+                x1 = coord.x;
+                y1 = coord.y;
+
+                var rx = parseFloat(coords[0]);
+                var ry = parseFloat(coords[1]);
+                var xAxisRotation = parseFloat(coords[2]) * Math.PI / 180;
+                var largeArcFlag = parseFloat(coords[3]);
+                var sweepFlag = parseFloat(coords[4]);
+
+                x4 = parseFloat(coords[5]);
+                y4 = parseFloat(coords[6]);
+
+                if (relative) {
+                  x4 += x1;
+                  y4 += y1;
+                }
+
+                // http://www.w3.org/TR/SVG/implnote.html#ArcConversionEndpointToCenter
+
+                // Calculate midpoint mx my
+                var mx = (x4 - x1) / 2;
+                var my = (y4 - y1) / 2;
+
+                // Calculate x1' y1' F.6.5.1
+                var _x = mx * Math.cos(xAxisRotation) + my * Math.sin(xAxisRotation);
+                var _y = - mx * Math.sin(xAxisRotation) + my * Math.cos(xAxisRotation);
+
+                var rx2 = rx * rx;
+                var ry2 = ry * ry;
+                var _x2 = _x * _x;
+                var _y2 = _y * _y;
+
+                // adjust radii
+                var l = _x2 / rx2 + _y2 / ry2;
+                if (l > 1) {
+                  rx *= Math.sqrt(l);
+                  ry *= Math.sqrt(l);
+                }
+
+                var amp = Math.sqrt((rx2 * ry2 - rx2 * _y2 - ry2 * _x2) / (rx2 * _y2 + ry2 * _x2));
+
+                if (_.isNaN(amp)) {
+                  amp = 0;
+                } else if (largeArcFlag != sweepFlag && amp > 0) {
+                  amp *= -1;
+                }
+
+                // Calculate cx' cy' F.6.5.2
+                var _cx = amp * rx * _y / ry;
+                var _cy = - amp * ry * _x / rx;
+
+                // Calculate cx cy F.6.5.3
+                var cx = _cx * Math.cos(xAxisRotation) - _cy * Math.sin(xAxisRotation) + (x1 + x4) / 2;
+                var cy = _cx * Math.sin(xAxisRotation) + _cy * Math.cos(xAxisRotation) + (y1 + y4) / 2;
+
+                // vector magnitude
+                var m = function(v) { return Math.sqrt(Math.pow(v[0], 2) + Math.pow(v[1], 2)); }
+                // ratio between two vectors
+                var r = function(u, v) { return (u[0] * v[0] + u[1] * v[1]) / (m(u) * m(v)) }
+                // angle between two vectors
+                var a = function(u, v) { return (u[0] * v[1] < u[1] * v[0] ? - 1 : 1) * Math.acos(r(u,v)); }
+
+                // Calculate theta1 and delta theta F.6.5.4 + F.6.5.5
+                var t1 = a([1, 0], [(_x - _cx) / rx, (_y - _cy) / ry]);
+                var u = [(_x - _cx) / rx, (_y - _cy) / ry];
+                var v = [( - _x - _cx) / rx, ( - _y - _cy) / ry];
+                var dt = a(u, v);
+
+                if (r(u, v) <= -1) dt = Math.PI;
+                if (r(u, v) >= 1) dt = 0;
+
+                // F.6.5.6
+                if (largeArcFlag)  {
+                  dt = mod(dt, Math.PI * 2);
+                }
+
+                if (sweepFlag && dt > 0) {
+                  dt -= Math.PI * 2;
+                }
+
+                var length = Two.Resolution;
+
+                // Save a projection of our rotation and translation to apply
+                // to the set of points.
+                var projection = new Two.Matrix()
+                  .translate(cx, cy)
+                  .rotate(xAxisRotation);
+
+                // Create a resulting array of Two.Anchor's to export to the
+                // the path.
+                result = _.map(_.range(length), function(i) {
+                  var pct = 1 - (i / (length - 1));
+                  var theta = pct * dt + t1;
+                  var x = rx * Math.cos(theta);
+                  var y = ry * Math.sin(theta);
+                  var projected = projection.multiply(x, y, 1);
+                  return new Two.Anchor(projected.x, projected.y, false, false, false, false, Two.Commands.line);;
+                });
+
+                result.push(new Two.Anchor(x4, y4, false, false, false, false, Two.Commands.line));
+
+                coord = result[result.length - 1];
+                control = coord.controls.left;
+
+                break;
+
             }
 
             return result;
@@ -840,10 +993,10 @@
 
           points = _.compact(points);
 
-          var poly = new Two.Polygon(points, closed, undefined, true).noStroke();
+          var poly = new Two.Path(points, closed, undefined, true).noStroke();
           poly.fill = 'black';
 
-          return Two.Utils.applySvgAttributes(node, poly);
+          return Two.Utils.applySvgAttributes.call(this, node, poly);
 
         },
 
@@ -860,13 +1013,13 @@
             var x = r * cos(theta);
             var y = r * sin(theta);
             return new Two.Anchor(x, y);
-          }, this);
+          });
 
-          var circle = new Two.Polygon(points, true, true).noStroke();
+          var circle = new Two.Path(points, true, true).noStroke();
           circle.translation.set(x, y);
           circle.fill = 'black';
 
-          return Two.Utils.applySvgAttributes(node, circle);
+          return Two.Utils.applySvgAttributes.call(this, node, circle);
 
         },
 
@@ -884,20 +1037,20 @@
             var x = width * cos(theta);
             var y = height * sin(theta);
             return new Two.Anchor(x, y);
-          }, this);
+          });
 
-          var ellipse = new Two.Polygon(points, true, true).noStroke();
+          var ellipse = new Two.Path(points, true, true).noStroke();
           ellipse.translation.set(x, y);
           ellipse.fill = 'black';
 
-          return Two.Utils.applySvgAttributes(node, ellipse);
+          return Two.Utils.applySvgAttributes.call(this, node, ellipse);
 
         },
 
         rect: function(node) {
 
-          var x = parseFloat(node.getAttribute('x'));
-          var y = parseFloat(node.getAttribute('y'));
+          var x = parseFloat(node.getAttribute('x')) || 0;
+          var y = parseFloat(node.getAttribute('y')) || 0;
           var width = parseFloat(node.getAttribute('width'));
           var height = parseFloat(node.getAttribute('height'));
 
@@ -911,11 +1064,11 @@
             new Two.Anchor(w2, -h2)
           ];
 
-          var rect = new Two.Polygon(points, true).noStroke();
+          var rect = new Two.Path(points, true).noStroke();
           rect.translation.set(x + w2, y + h2);
           rect.fill = 'black';
 
-          return Two.Utils.applySvgAttributes(node, rect);
+          return Two.Utils.applySvgAttributes.call(this, node, rect);
 
         },
 
@@ -939,10 +1092,102 @@
 
           // Center line and translate to desired position.
 
-          var line = new Two.Polygon(points).noFill();
+          var line = new Two.Path(points).noFill();
           line.translation.set(x1 + w2, y1 + h2);
 
-          return Two.Utils.applySvgAttributes(node, line);
+          return Two.Utils.applySvgAttributes.call(this, node, line);
+
+        },
+
+        lineargradient: function(node) {
+
+          var x1 = parseFloat(node.getAttribute('x1'));
+          var y1 = parseFloat(node.getAttribute('y1'));
+          var x2 = parseFloat(node.getAttribute('x2'));
+          var y2 = parseFloat(node.getAttribute('y2'));
+
+          var ox = (x2 + x1) / 2;
+          var oy = (y2 + y1) / 2;
+
+          var stops = [];
+          for (var i = 0; i < node.children.length; i++) {
+
+            var child = node.children[i];
+
+            var offset = parseFloat(child.getAttribute('offset'));
+            var color = child.getAttribute('stop-color');
+            var opacity = child.getAttribute('stop-opacity');
+            var style = child.getAttribute('style');
+
+            if (_.isNull(color)) {
+              var matches = style.match(/stop\-color\:\s?([\#a-fA-F0-9]*)/);
+              color = matches && matches.length > 1 ? matches[1] : undefined;
+            }
+
+            if (_.isNull(opacity)) {
+              var matches = style.match(/stop\-opacity\:\s?([0-1\.\-]*)/);
+              opacity = matches && matches.length > 1 ? parseFloat(matches[1]) : 1;
+            }
+
+            stops.push(new Two.Gradient.Stop(offset, color, opacity));
+
+          }
+
+          var gradient = new Two.LinearGradient(x1 - ox, y1 - oy, x2 - ox,
+            y2 - oy, stops);
+
+          return Two.Utils.applySvgAttributes.call(this, node, gradient);
+
+        },
+
+        radialgradient: function(node) {
+
+          var cx = parseFloat(node.getAttribute('cx')) || 0;
+          var cy = parseFloat(node.getAttribute('cy')) || 0;
+          var r = parseFloat(node.getAttribute('r'));
+
+          var fx = parseFloat(node.getAttribute('fx'));
+          var fy = parseFloat(node.getAttribute('fy'));
+
+          if (_.isNaN(fx)) {
+            fx = cx;
+          }
+
+          if (_.isNaN(fy)) {
+            fy = cy;
+          }
+
+          var ox = Math.abs(cx + fx) / 2;
+          var oy = Math.abs(cy + fy) / 2;
+
+          var stops = [];
+          for (var i = 0; i < node.children.length; i++) {
+
+            var child = node.children[i];
+
+            var offset = parseFloat(child.getAttribute('offset'));
+            var color = child.getAttribute('stop-color');
+            var opacity = child.getAttribute('stop-opacity');
+            var style = child.getAttribute('style');
+
+            if (_.isNull(color)) {
+              var matches = style.match(/stop\-color\:\s?([\#a-fA-F0-9]*)/);
+              color = matches && matches.length > 1 ? matches[1] : undefined;
+            }
+
+            if (_.isNull(opacity)) {
+              var matches = style.match(/stop\-opacity\:\s?([0-1\.\-]*)/);
+              opacity = matches && matches.length > 1 ? parseFloat(matches[1]) : 1;
+            }
+
+            stops.push(new Two.Gradient.Stop(offset, color, opacity));
+
+          }
+
+          var gradient = new Two.RadialGradient(cx - ox, cy - oy, r,
+            stops, fx - ox, fy - oy);
+
+          return Two.Utils.applySvgAttributes.call(this, node, gradient);
 
         }
 
@@ -1144,6 +1389,48 @@
 
       },
 
+      getAnchorsFromArcData: function(center, xAxisRotation, rx, ry, ts, td, ccw) {
+
+        var matrix = new Two.Matrix()
+          .translate(center.x, center.y)
+          .rotate(xAxisRotation);
+
+        var l = Two.Resolution;
+
+        // console.log(arguments);
+
+        return _.map(_.range(l), function(i) {
+
+          var pct = (i + 1) / l;
+          if (!!ccw) {
+            pct = 1 - pct;
+          }
+
+          var theta = pct * td + ts;
+          var x = rx * Math.cos(theta);
+          var y = ry * Math.sin(theta);
+
+          // x += center.x;
+          // y += center.y;
+
+          var anchor = new Two.Anchor(x, y);
+          Two.Anchor.AppendCurveProperties(anchor);
+          anchor.command = Two.Commands.line;
+
+          // TODO: Calculate control points here...
+
+          return anchor;
+
+        });
+
+      },
+
+      ratioBetween: function(A, B) {
+
+        return (A.x * B.x + A.y * B.y) / (A.length() * B.length());
+
+      },
+
       angleBetween: function(A, B) {
 
         var dx, dy;
@@ -1206,7 +1493,7 @@
 
         if (arguments.length > 1) {
           Array.prototype.push.apply(this, arguments);
-        } else if( arguments[0] && Array.isArray(arguments[0]) ) {
+        } else if (arguments[0] && Array.isArray(arguments[0])) {
           Array.prototype.push.apply(this, arguments[0]);
         }
 
@@ -1262,10 +1549,23 @@
       this.trigger(Two.Events.remove, spliced);
 
       if (arguments.length > 2) {
-        inserted = this.slice(arguments[0], arguments.length-2);
+        inserted = this.slice(arguments[0], arguments.length - 2);
         this.trigger(Two.Events.insert, inserted);
+        this.trigger(Two.Events.order);
       }
       return spliced;
+    },
+
+    sort: function() {
+      Array.prototype.sort.apply(this, arguments);
+      this.trigger(Two.Events.order);
+      return this;
+    },
+
+    reverse: function() {
+      Array.prototype.reverse.apply(this, arguments);
+      this.trigger(Two.Events.order);
+      return this;
     }
 
   });
@@ -1273,7 +1573,9 @@
   // Localize utils
 
   var distanceBetween = Two.Utils.distanceBetween,
+    getAnchorsFromArcData = Two.Utils.getAnchorsFromArcData,
     distanceBetweenSquared = Two.Utils.distanceBetweenSquared,
+    ratioBetween = Two.Utils.ratioBetween,
     angleBetween = Two.Utils.angleBetween,
     getControlPoints = Two.Utils.getControlPoints,
     getCurveFromPoints = Two.Utils.getCurveFromPoints,
@@ -1356,7 +1658,7 @@
     add: function(o) {
 
       var objects = o;
-      if (!_.isArray(o)) {
+      if (!(objects instanceof Array)) {
         objects = _.toArray(arguments);
       }
 
@@ -1368,7 +1670,7 @@
     remove: function(o) {
 
       var objects = o;
-      if (!_.isArray(o)) {
+      if (!(objects instanceof Array)) {
         objects = _.toArray(arguments);
       }
 
@@ -1387,43 +1689,27 @@
 
     makeLine: function(x1, y1, x2, y2) {
 
-      var width = x2 - x1;
-      var height = y2 - y1;
-
-      var w2 = width / 2;
-      var h2 = height / 2;
-
-      var points = [
-        new Two.Anchor(- w2, - h2),
-        new Two.Anchor(w2, h2)
-      ];
-
-      // Center line and translate to desired position.
-
-      var line = new Two.Polygon(points).noFill();
-      line.translation.set(x1 + w2, y1 + h2);
-
+      var line = new Two.Line(x1, y1, x2, y2);
       this.scene.add(line);
+
       return line;
 
     },
 
     makeRectangle: function(x, y, width, height) {
 
-      var w2 = width / 2;
-      var h2 = height / 2;
-
-      var points = [
-        new Two.Anchor(-w2, -h2),
-        new Two.Anchor(w2, -h2),
-        new Two.Anchor(w2, h2),
-        new Two.Anchor(-w2, h2)
-      ];
-
-      var rect = new Two.Polygon(points, true);
-      rect.translation.set(x, y);
-
+      var rect = new Two.Rectangle(x, y, width, height);
       this.scene.add(rect);
+
+      return rect;
+
+    },
+
+    makeRoundedRectangle: function(x, y, width, height, sides) {
+
+      var rect = new Two.RoundedRectangle(x, y, width, height, sides);
+      this.scene.add(rect);
+
       return rect;
 
     },
@@ -1434,24 +1720,21 @@
 
     },
 
-    makeEllipse: function(ox, oy, width, height) {
+    makeEllipse: function(ox, oy, rx, ry) {
 
-      var amount = Two.Resolution;
-
-      var points = _.map(_.range(amount), function(i) {
-        var pct = i / amount;
-        var theta = pct * TWO_PI;
-        var x = width * cos(theta);
-        var y = height * sin(theta);
-        return new Two.Anchor(x, y);
-      }, this);
-
-      var ellipse = new Two.Polygon(points, true, true);
-      ellipse.translation.set(ox, oy);
-
+      var ellipse = new Two.Ellipse(ox, oy, rx, ry);
       this.scene.add(ellipse);
 
       return ellipse;
+
+    },
+
+    makeStar: function(ox, oy, or, ir, sides) {
+
+      var star = new Two.Star(ox, oy, or, ir, sides);
+      this.scene.add(star);
+
+      return star;
 
     },
 
@@ -1471,29 +1754,40 @@
       }
 
       var last = arguments[l - 1];
-      var poly = new Two.Polygon(points, !(_.isBoolean(last) ? last : undefined), true);
-      var rect = poly.getBoundingClientRect();
+      var curve = new Two.Path(points, !(_.isBoolean(last) ? last : undefined), true);
+      var rect = curve.getBoundingClientRect();
+      curve.center().translation
+        .set(rect.left + rect.width / 2, rect.top + rect.height / 2);
 
-      var cx = rect.left + rect.width / 2;
-      var cy = rect.top + rect.height / 2;
+      this.scene.add(curve);
 
-      _.each(poly.vertices, function(v) {
-        v.x -= cx;
-        v.y -= cy;
-      });
+      return curve;
 
-      poly.translation.set(cx, cy);
+    },
 
+    makePolygon: function(ox, oy, r, sides) {
+
+      var poly = new Two.Polygon(ox, oy, r, sides);
       this.scene.add(poly);
 
       return poly;
 
     },
 
+    /*
+    * Make an Arc Segment
+    */
+
+    makeArcSegment: function(ox, oy, ir, or, sa, ea, res) {
+      var arcSegment = new Two.ArcSegment(ox, oy, ir, or, sa, ea, res);
+      this.scene.add(arcSegment);
+      return arcSegment;
+    },
+
     /**
-     * Convenience method to make and draw a Two.Polygon.
+     * Convenience method to make and draw a Two.Path.
      */
-    makePolygon: function(p) {
+    makePath: function(p) {
 
       var l = arguments.length, points = p;
       if (!_.isArray(p)) {
@@ -1509,21 +1803,49 @@
       }
 
       var last = arguments[l - 1];
-      var poly = new Two.Polygon(points, !(_.isBoolean(last) ? last : undefined));
-      var rect = poly.getBoundingClientRect();
-      poly.center().translation
+      var path = new Two.Path(points, !(_.isBoolean(last) ? last : undefined));
+      var rect = path.getBoundingClientRect();
+      path.center().translation
         .set(rect.left + rect.width / 2, rect.top + rect.height / 2);
 
-      this.scene.add(poly);
+      this.scene.add(path);
 
-      return poly;
+      return path;
+
+    },
+
+    /**
+     * Convenience method to make and add a Two.LinearGradient.
+     */
+    makeLinearGradient: function(x1, y1, x2, y2 /* stops */) {
+
+      var stops = Array.prototype.slice.call(arguments, 4);
+      var gradient = new Two.LinearGradient(x1, y1, x2, y2, stops);
+
+      this.add(gradient);
+
+      return gradient;
+
+    },
+
+    /**
+     * Convenience method to make and add a Two.RadialGradient.
+     */
+    makeRadialGradient: function(x1, y1, r /* stops */) {
+
+      var stops = Array.prototype.slice.call(arguments, 3);
+      var gradient = new Two.RadialGradient(x1, y1, r, stops);
+
+      this.add(gradient);
+
+      return gradient;
 
     },
 
     makeGroup: function(o) {
 
       var objects = o;
-      if (!_.isArray(o)) {
+      if (!(objects instanceof Array)) {
         objects = _.toArray(arguments);
       }
 
@@ -1535,8 +1857,6 @@
 
     },
 
-    // Utility Functions will go here.
-
     /**
      * Interpret an SVG Node and add it to this instance's scene. The
      * distinction should be made that this doesn't `import` svg's, it solely
@@ -1544,10 +1864,10 @@
      * different than a direct transcription.
      *
      * @param {Object} svgNode - The node to be parsed
-     * @param {Boolean} noWrappingGroup - Don't create a top-most group but
+     * @param {Boolean} shallow - Don't create a top-most group but
      *                                    append all contents directly
      */
-    interpret: function(svgNode, noWrapInGroup) {
+    interpret: function(svgNode, shallow) {
 
       var tag = svgNode.tagName.toLowerCase();
 
@@ -1557,13 +1877,52 @@
 
       var node = Two.Utils.read[tag].call(this, svgNode);
 
-      if (noWrapInGroup && node instanceof Two.Group) {
-        this.add(_.values(node.children));
+      if (shallow && node instanceof Two.Group) {
+        this.add(node.children);
       } else {
         this.add(node);
       }
 
       return node;
+
+    },
+
+    /**
+     * Load an SVG file / text and interpret.
+     */
+    load: function(text, callback) {
+
+      var nodes = [], elem, i;
+
+      if (/.*\.svg/ig.test(text)) {
+
+        Two.Utils.xhr(text, _.bind(function(data) {
+
+          dom.temp.innerHTML = data;
+          for (i = 0; i < dom.temp.children.length; i++) {
+            elem = dom.temp.children[i];
+            nodes.push(this.interpret(elem));
+          }
+
+          callback(nodes.length <= 1 ? nodes[0] : nodes,
+            dom.temp.children.length <= 1 ? dom.temp.children[0] : dom.temp.children);
+
+        }, this));
+
+        return this;
+
+      }
+
+      dom.temp.innerHTML = text;
+      for (i = 0; i < dom.temp.children.length; i++) {
+        elem = dom.temp.children[i];
+        nodes.push(this.interpret(elem));
+      }
+
+      callback(nodes.length <= 1 ? nodes[0] : nodes,
+        dom.temp.children.length <= 1 ? dom.temp.children[0] : dom.temp.children);
+
+      return this;
 
     }
 
@@ -1610,4 +1969,9 @@
   //Node
   module.exports = Two;
 
-})();
+})(
+  this.Two || {},
+  typeof require === 'function' ? require('underscore') : _,
+  typeof require === 'function' ? require('backbone') : Backbone,
+  typeof require === 'function' ? require('requestAnimationFrame') : requestAnimationFrame
+);

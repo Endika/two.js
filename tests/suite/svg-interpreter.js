@@ -1,5 +1,6 @@
 /**
  * Tests Two.js Utilities related to Svg Interpretation:
+ * + two.load()
  * + two.interpret()
  * + polygon.subdivide()
  */
@@ -8,7 +9,30 @@
 
   module('SvgInterpreter');
 
-  asyncTest('Two.interpret', 7, function(o) {
+  asyncTest('Two.load', 1, function(o) {
+
+    var two = new Two({
+      width: 400,
+      height: 400
+    });
+
+    two.load('./images/interpretation/D.svg', function(shape, svg) {
+
+      var answer = {"children":[{"vertices":[{"x":122.049,"y":350,"command":"M","relative":true,"controls":{"left":{"x":0,"y":0},"right":{"x":0,"y":0}}},{"x":122.10700000000001,"y":50,"command":"L","relative":true,"controls":{"left":{"x":0,"y":0},"right":{"x":77.89900000000002,"y":0}}},{"x":277.952,"y":118.883,"command":"C","relative":true,"controls":{"left":{"x":0,"y":-67.354},"right":{"x":0,"y":0}}},{"x":277.952,"y":273.965,"command":"C","relative":true,"controls":{"left":{"x":0,"y":-75.976},"right":{"x":-0.0009999999999763531,"y":75.976}}},{"x":122.049,"y":350,"command":"C","relative":true,"controls":{"left":{"x":77.957,"y":0},"right":{"x":0,"y":0}}}],"rotation":0,"scale":1}],"translation":{"x":200,"y":200},"rotation":0,"scale":1};
+      shape.translation.set(two.width / 2, two.height / 2);
+      two.update();
+
+      ok(QUnit.Utils.shapeEquals(answer, shape), 'Two.load loads SVG files properly.');
+
+      start();
+
+      QUnit.Utils.addElemToTest(o, [two.renderer.domElement, svg]);
+
+    });
+
+  });
+
+  asyncTest('Two.interpret', 9, function(o) {
 
     (function() {
 
@@ -192,6 +216,58 @@
 
     })();
 
+    (function() {
+
+      var two = new Two({
+        width: 400,
+        height: 400
+      });
+
+      QUnit.Utils.get('./images/interpretation/linear-gradient.svg', function(resp) {
+
+        var answer = {"children":[{"stops":[{"offset":0,"opacity":1,"color":"#000000"},{"offset":0.33,"opacity":1,"color":"#FFF200"},{"offset":0.66,"opacity":1,"color":"#EC008C"},{"offset":1,"opacity":1,"color":"#00AEEF"}],"spread":"pad","left":{"x":-100,"y":0},"right":{"x":100,"y":0}},{"vertices":[{"x":100,"y":100,"command":"M","relative":true},{"x":-100,"y":100,"command":"L","relative":true},{"x":-100,"y":-100,"command":"L","relative":true},{"x":100,"y":-100,"command":"L","relative":true}],"rotation":0,"scale":1}],"translation":{"x":200,"y":200},"rotation":0,"scale":1};
+        var svg = QUnit.Utils.textToDOM(resp)[0];
+        var shape = two.interpret(svg).center();
+
+        shape.translation.set(two.width / 2, two.height / 2);
+
+        two.update();
+
+        ok(QUnit.Utils.shapeEquals(answer, shape), 'Two.interpret imports <linear-gradient> properly.');
+        start();
+
+        QUnit.Utils.addElemToTest(o, [two.renderer.domElement, svg]);
+
+      });
+
+    })();
+
+    (function() {
+
+      var two = new Two({
+        width: 400,
+        height: 400
+      });
+
+      QUnit.Utils.get('./images/interpretation/radial-gradient.svg', function(resp) {
+
+        var answer = {"children":[{"stops":[{"offset":0,"opacity":1,"color":"#000000"},{"offset":0.33,"opacity":1,"color":"#FFF200"},{"offset":0.66,"opacity":1,"color":"#EC008C"},{"offset":1,"opacity":1,"color":"#00AEEF"}],"spread":"pad","radius":100,"center":{"x":0,"y":0},"focal":{"x":0,"y":0}},{"vertices":[{"x":100,"y":100,"command":"M","relative":true},{"x":-100,"y":100,"command":"L","relative":true},{"x":-100,"y":-100,"command":"L","relative":true},{"x":100,"y":-100,"command":"L","relative":true}],"rotation":0,"scale":1}],"translation":{"x":200,"y":200},"rotation":0,"scale":1};
+        var svg = QUnit.Utils.textToDOM(resp)[0];
+        var shape = two.interpret(svg).center();
+
+        shape.translation.set(two.width / 2, two.height / 2);
+
+        two.update();
+
+        ok(QUnit.Utils.shapeEquals(answer, shape), 'Two.interpret imports <radial-gradient> properly.');
+        start();
+
+        QUnit.Utils.addElemToTest(o, [two.renderer.domElement, svg]);
+
+      });
+
+    })();
+
   });
 
   asyncTest('Two.subdivide', 3, function(o) {
@@ -285,7 +361,7 @@
 
   });
 
-  // Use this function to get an answer of interpreted Two.Polygon
+  // Use this function to get an answer of interpreted Two.Path
   function retrieveObject(shape) {
     var result = shape.toObject();
     result.children = _.toArray(result.children);

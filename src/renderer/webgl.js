@@ -1,4 +1,4 @@
-(function(Two) {
+(function(Two, _, Backbone, requestAnimationFrame) {
 
   /**
    * Constants
@@ -9,11 +9,16 @@
     identity = [1, 0, 0, 0, 1, 0, 0, 0, 1],
     transformation = new Two.Array(9),
     getRatio = Two.Utils.getRatio,
+    getComputedMatrix = Two.Utils.getComputedMatrix,
     toFixed = Two.Utils.toFixed;
 
   var webgl = {
 
+    isHidden: /(none|transparent)/i,
+
     canvas: document.createElement('canvas'),
+
+    matrix: new Two.Matrix(),
 
     uv: new Two.Array([
       0, 0,
@@ -25,6 +30,18 @@
     ]),
 
     group: {
+
+      removeChild: function(child, gl) {
+        if (child.children) {
+          for (var i = 0; i < child.children.length; i++) {
+            webgl.group.removeChild(child.children[i], gl);
+          }
+          return;
+        }
+        // Deallocate texture to free up gl memory.
+        gl.deleteTexture(child._renderer.texture);
+        delete child._renderer.texture;
+      },
 
       renderChild: function(child) {
         webgl[child._renderer.type].render.call(child, this.gl, this.program);
@@ -77,7 +94,13 @@
         this._renderer.opacity = this._opacity
           * (parent && parent._renderer ? parent._renderer.opacity : 1);
 
-        _.each(this.children, webgl.group.renderChild, {
+        if (this._flagSubtractions) {
+          for (var i = 0; i < this.subtractions.length; i++) {
+            webgl.group.removeChild(this.subtractions[i], gl);
+          }
+        }
+
+        this.children.forEach(webgl.group.renderChild, {
           gl: gl,
           program: program
         });
@@ -103,7 +126,7 @@
 
     },
 
-    polygon: {
+    path: {
 
       render: function(gl, program, forcedParent) {
 
@@ -117,9 +140,14 @@
         var flagParentMatrix = parent._matrix.manual || parent._flagMatrix;
         var flagMatrix = this._matrix.manual || this._flagMatrix;
         var flagTexture = this._flagVertices || this._flagFill
+          || (this._fill instanceof Two.LinearGradient && (this._fill._flagSpread || this._fill._flagStops || this._fill._flagEndPoints))
+          || (this._fill instanceof Two.RadialGradient && (this._fill._flagSpread || this._fill._flagStops || this._fill._flagRadius || this._fill._flagCenter || this._fill._flagFocal))
+          || (this._stroke instanceof Two.LinearGradient && (this._stroke._flagSpread || this._stroke._flagStops || this._stroke._flagEndPoints))
+          || (this._stroke instanceof Two.RadialGradient && (this._stroke._flagSpread || this._stroke._flagStops || this._stroke._flagRadius || this._stroke._flagCenter || this._stroke._flagFocal))
           || this._flagStroke || this._flagLinewidth || this._flagOpacity
           || parent._flagOpacity || this._flagVisible || this._flagCap
-          || this._flagJoin || this._flagMiter || this._flagScale;
+          || this._flagJoin || this._flagMiter || this._flagScale
+          || !this._renderer.texture;
 
         this._update();
 
@@ -184,6 +212,74 @@
         gl.vertexAttribPointer(program.position, 2, gl.FLOAT, false, 0, 0);
 
         gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        return this.flagReset();
+
+      }
+
+    },
+
+    'linear-gradient': {
+
+      render: function(ctx, elem) {
+
+        if (!ctx.canvas.getContext('2d')) {
+          return;
+        }
+
+        this._update();
+
+        if (!this._renderer.gradient || this._flagEndPoints || this._flagStops) {
+
+          var ox = ctx.canvas.width / 2;
+          var oy = ctx.canvas.height / 2;
+          var scale = elem._renderer.scale;
+
+          this._renderer.gradient = ctx.createLinearGradient(
+            this.left._x * scale + ox, this.left._y * scale + oy,
+            this.right._x * scale + ox, this.right._y * scale + oy
+          );
+
+          for (var i = 0; i < this.stops.length; i++) {
+            var stop = this.stops[i];
+            this._renderer.gradient.addColorStop(stop._offset, stop._color);
+          }
+
+        }
+
+        return this.flagReset();
+
+      }
+
+    },
+
+    'radial-gradient': {
+
+      render: function(ctx, elem) {
+
+        if (!ctx.canvas.getContext('2d')) {
+          return;
+        }
+
+        this._update();
+
+        if (!this._renderer.gradient || this._flagCenter || this._flagFocal
+            || this._flagRadius || this._flagStops) {
+
+          var ox = ctx.canvas.width / 2;
+          var oy = ctx.canvas.height / 2;
+
+          this._renderer.gradient = ctx.createRadialGradient(
+            this.center._x + ox, this.center._y + oy, 0,
+            this.focal._x + ox, this.focal._y + oy, this._radius * elem._renderer.scale
+          );
+
+          for (var i = 0; i < this.stops.length; i++) {
+            var stop = this.stops[i];
+            this._renderer.gradient.addColorStop(stop._offset, stop._color);
+          }
+
+        }
 
         return this.flagReset();
 
@@ -299,6 +395,8 @@
 
     updateCanvas: function(elem) {
 
+      var next, prev, a, c, ux, uy, vx, vy, ar, bl, br, cl, x, y;
+
       var commands = elem._vertices;
       var canvas = this.canvas;
       var ctx = this.ctx;
@@ -326,10 +424,20 @@
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       if (fill) {
-        ctx.fillStyle = fill;
+        if (_.isString(fill)) {
+          ctx.fillStyle = fill;
+        } else {
+          webgl[fill._renderer.type].render.call(fill, ctx, elem);
+          ctx.fillStyle = fill._renderer.gradient;
+        }
       }
       if (stroke) {
-        ctx.strokeStyle = stroke;
+        if (_.isString(stroke)) {
+          ctx.strokeStyle = stroke;
+        } else {
+          webgl[stroke._renderer.type].render.call(stroke, ctx, elem);
+          ctx.strokeStyle = stroke._renderer.gradient;
+        }
       }
       if (linewidth) {
         ctx.lineWidth = linewidth;
@@ -349,11 +457,13 @@
 
       var d;
       ctx.beginPath();
-      commands.forEach(function(b, i) {
+      // commands.forEach(function(b, i) {
+      for (var i = 0; i < commands.length; i++) {
 
-        var next, prev, a, c, ux, uy, vx, vy, ar, bl, br, cl, x, y;
-        x = toFixed(b.x * scale + cx);
-        y = toFixed(b.y * scale + cy);
+        b = commands[i];
+
+        x = toFixed(b._x * scale + cx);
+        y = toFixed(b._y * scale + cy);
 
         switch (b._command) {
 
@@ -372,16 +482,16 @@
             bl = (b.controls && b.controls.left) || b;
 
             if (a._relative) {
-              vx = toFixed((ar.x + a.x) * scale + cx);
-              vy = toFixed((ar.y + a.y) * scale + cy);
+              vx = toFixed((ar.x + a._x) * scale + cx);
+              vy = toFixed((ar.y + a._y) * scale + cy);
             } else {
               vx = toFixed(ar.x * scale + cx);
               vy = toFixed(ar.y * scale + cy);
             }
 
             if (b._relative) {
-              ux = toFixed((bl.x + b.x) * scale + cx);
-              uy = toFixed((bl.y + b.y) * scale + cy);
+              ux = toFixed((bl.x + b._x) * scale + cx);
+              uy = toFixed((bl.y + b._y) * scale + cy);
             } else {
               ux = toFixed(bl.x * scale + cx);
               uy = toFixed(bl.y * scale + cy);
@@ -397,23 +507,23 @@
               cl = (c.controls && c.controls.left) || c;
 
               if (b._relative) {
-                vx = toFixed((br.x + b.x) * scale + cx);
-                vy = toFixed((br.y + b.y) * scale + cy);
+                vx = toFixed((br.x + b._x) * scale + cx);
+                vy = toFixed((br.y + b._y) * scale + cy);
               } else {
                 vx = toFixed(br.x * scale + cx);
                 vy = toFixed(br.y * scale + cy);
               }
 
               if (c._relative) {
-                ux = toFixed((cl.x + c.x) * scale + cx);
-                uy = toFixed((cl.y + c.y) * scale + cy);
+                ux = toFixed((cl.x + c._x) * scale + cx);
+                uy = toFixed((cl.y + c._y) * scale + cy);
               } else {
                 ux = toFixed(cl.x * scale + cx);
                 uy = toFixed(cl.y * scale + cy);
               }
 
-              x = toFixed(c.x * scale + cx);
-              y = toFixed(c.y * scale + cy);
+              x = toFixed(c._x * scale + cx);
+              y = toFixed(c._y * scale + cy);
 
               ctx.bezierCurveTo(vx, vy, ux, uy, x, y);
 
@@ -432,7 +542,7 @@
 
         }
 
-      });
+      }
 
       // Loose ends
 
@@ -440,8 +550,8 @@
         ctx.closePath();
       }
 
-      ctx.fill();
-      ctx.stroke();
+      if (!webgl.isHidden.test(fill)) ctx.fill();
+      if (!webgl.isHidden.test(stroke)) ctx.stroke();
 
     },
 
@@ -704,4 +814,9 @@
 
   });
 
-})(Two);
+})(
+  Two,
+  typeof require === 'function' ? require('underscore') : _,
+  typeof require === 'function' ? require('backbone') : Backbone,
+  typeof require === 'function' ? require('requestAnimationFrame') : requestAnimationFrame
+);

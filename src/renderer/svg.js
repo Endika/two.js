@@ -1,4 +1,4 @@
-(function(Two) {
+(function(Two, _, Backbone, requestAnimationFrame) {
 
   // Localize variables
   var mod = Two.Utils.mod, toFixed = Two.Utils.toFixed;
@@ -21,7 +21,7 @@
           version: this.version
         });
       }
-      if (_.isObject(attrs)) {
+      if (!_.isEmpty(attrs)) {
         svg.setAttributes(elem, attrs);
       }
       return elem;
@@ -31,8 +31,9 @@
      * Add attributes from an svg element.
      */
     setAttributes: function(elem, attrs) {
-      for (var key in attrs) {
-        elem.setAttribute(key, attrs[key]);
+      var keys = Object.keys(attrs);
+      for (var i = 0; i < keys.length; i++) {
+        elem.setAttribute(keys[i], attrs[keys[i]]);
       }
       return this;
     },
@@ -166,11 +167,11 @@
 
     getClip: function(shape) {
 
-      clip = shape._renderer.clip;
+      var clip = shape._renderer.clip;
 
       if (!clip) {
 
-        root = shape;
+        var root = shape;
 
         while (root.parent) {
           root = root.parent;
@@ -189,9 +190,9 @@
 
       // TODO: Can speed up.
       // TODO: How does this effect a f
-      appendChild: function(id) {
+      appendChild: function(object) {
 
-        var elem = this.domElement.querySelector('#' + id);
+        var elem = object._renderer.elem;
 
         if (!elem) {
           return;
@@ -199,14 +200,7 @@
 
         var tag = elem.nodeName;
 
-        if (!tag) {
-          return;
-        }
-
-        var tagName = tag.replace(/svg\:/ig, '').toLowerCase();
-
-        // Defer additions while clipping
-        if (/clippath/.test(tagName)) {
+        if (!tag || /(radial|linear)gradient/i.test(tag) || object._clip) {
           return;
         }
 
@@ -214,12 +208,11 @@
 
       },
 
-      // TODO: Can speed up.
-      removeChild: function(id) {
+      removeChild: function(object) {
 
-        var elem = this.domElement.querySelector('#' + id);
+        var elem = object._renderer.elem;
 
-        if (!elem) {
+        if (!elem || elem.parentNode != this.elem) {
           return;
         }
 
@@ -229,15 +222,17 @@
           return;
         }
 
-        var tagName = tag.replace(/svg\:/ig, '').toLowerCase();
-
-        // Defer subtractions while clipping
-        if (/clippath/.test(tagName)) {
+        // Defer subtractions while clipping.
+        if (object._clip) {
           return;
         }
 
         this.elem.removeChild(elem);
 
+      },
+
+      orderChild: function(object) {
+        this.elem.appendChild(object._renderer.elem);
       },
 
       renderChild: function(child) {
@@ -273,8 +268,8 @@
           this._renderer.elem.setAttribute('transform', 'matrix(' + this._matrix.toString() + ')');
         }
 
-        for (var id in this.children) {
-          var child = this.children[id];
+        for (var i = 0; i < this.children.length; i++) {
+          var child = this.children[i];
           svg[child._renderer.type].render.call(child, domElement);
         }
 
@@ -283,11 +278,15 @@
         }
 
         if (this._flagAdditions) {
-          _.each(this.additions, svg.group.appendChild, context);
+          this.additions.forEach(svg.group.appendChild, context);
         }
 
         if (this._flagSubtractions) {
-          _.each(this.subtractions, svg.group.removeChild, context);
+          this.subtractions.forEach(svg.group.removeChild, context);
+        }
+
+        if (this._flagOrder) {
+          this.children.forEach(svg.group.orderChild, context);
         }
 
         /**
@@ -327,7 +326,7 @@
 
     },
 
-    polygon: {
+    path: {
 
       render: function(domElement) {
 
@@ -355,7 +354,9 @@
         }
 
         if (this._flagFill) {
-          changed.fill = this._fill;
+
+          changed.fill = this._fill && this._fill.id
+            ? 'url(#' + this._fill.id + ')' : this._fill;
         }
 
         if (this._flagStroke) {
@@ -384,7 +385,7 @@
         }
 
         if (this._flagMiter) {
-          changed['stroke-miterlimit'] = this.miter;
+          changed['stroke-miterlimit'] = this._miter;
         }
 
         // If there is no attached DOM element yet,
@@ -402,8 +403,8 @@
 
         if (this._flagClip) {
 
-          clip = svg.getClip(this);
-          elem = this._renderer.elem;
+          var clip = svg.getClip(this);
+          var elem = this._renderer.elem;
 
           if (this._clip) {
             elem.removeAttribute('id');
@@ -435,6 +436,159 @@
 
       }
 
+    },
+
+    'linear-gradient': {
+
+      render: function(domElement) {
+
+        this._update();
+
+        var changed = {};
+
+        if (this._flagEndPoints) {
+          changed.x1 = this.left._x;
+          changed.y1 = this.left._y;
+          changed.x2 = this.right._x;
+          changed.y2 = this.right._y;
+        }
+
+        if (this._flagSpread) {
+          changed.spreadMethod = this._spread;
+        }
+
+        // If there is no attached DOM element yet,
+        // create it with all necessary attributes.
+        if (!this._renderer.elem) {
+
+          changed.id = this.id;
+          changed.gradientUnits = 'userSpaceOnUse';
+          this._renderer.elem = svg.createElement('linearGradient', changed);
+          domElement.defs.appendChild(this._renderer.elem);
+
+        // Otherwise apply all pending attributes
+        } else {
+
+          svg.setAttributes(this._renderer.elem, changed);
+
+        }
+
+        if (this._flagStops) {
+
+          this._renderer.elem.childNodes.length = 0;
+
+          for (var i = 0; i < this.stops.length; i++) {
+
+            var stop = this.stops[i];
+            var attrs = {};
+
+            if (stop._flagOffset) {
+              attrs.offset = 100 * stop._offset + '%';
+            }
+            if (stop._flagColor) {
+              attrs['stop-color'] = stop._color;
+            }
+            if (stop._flagOpacity) {
+              attrs['stop-opacity'] = stop._opacity;
+            }
+
+            if (!stop._renderer.elem) {
+              stop._renderer.elem = svg.createElement('stop', attrs);
+            } else {
+              svg.setAttributes(stop._renderer.elem, attrs);
+            }
+
+            this._renderer.elem.appendChild(stop._renderer.elem);
+
+            stop.flagReset();
+
+          }
+
+        }
+
+        return this.flagReset();
+
+      }
+
+    },
+
+    'radial-gradient': {
+
+      render: function(domElement) {
+
+        this._update();
+
+        var changed = {};
+
+        if (this._flagCenter) {
+          changed.cx = this.center._x;
+          changed.cy = this.center._y;
+        }
+        if (this._flagFocal) {
+          changed.fx = this.focal._x;
+          changed.fy = this.focal._y;
+        }
+
+        if (this._flagRadius) {
+          changed.r = this._radius;
+        }
+
+        if (this._flagSpread) {
+          changed.spreadMethod = this._spread;
+        }
+
+        // If there is no attached DOM element yet,
+        // create it with all necessary attributes.
+        if (!this._renderer.elem) {
+
+          changed.id = this.id;
+          changed.gradientUnits = 'userSpaceOnUse';
+          this._renderer.elem = svg.createElement('radialGradient', changed);
+          domElement.defs.appendChild(this._renderer.elem);
+
+        // Otherwise apply all pending attributes
+        } else {
+
+          svg.setAttributes(this._renderer.elem, changed);
+
+        }
+
+        if (this._flagStops) {
+
+          this._renderer.elem.childNodes.length = 0;
+
+          for (var i = 0; i < this.stops.length; i++) {
+
+            var stop = this.stops[i];
+            var attrs = {};
+
+            if (stop._flagOffset) {
+              attrs.offset = 100 * stop._offset + '%';
+            }
+            if (stop._flagColor) {
+              attrs['stop-color'] = stop._color;
+            }
+            if (stop._flagOpacity) {
+              attrs['stop-opacity'] = stop._opacity;
+            }
+
+            if (!stop._renderer.elem) {
+              stop._renderer.elem = svg.createElement('stop', attrs);
+            } else {
+              svg.setAttributes(stop._renderer.elem, attrs);
+            }
+
+            this._renderer.elem.appendChild(stop._renderer.elem);
+            stop.flagReset();
+
+          }
+
+        }
+
+        return this.flagReset();
+
+      }
+
     }
 
   };
@@ -451,6 +605,8 @@
 
     this.defs = svg.createElement('defs');
     this.domElement.appendChild(this.defs);
+    this.domElement.defs = this.defs;
+    this.domElement.style.overflow = 'hidden';
 
   };
 
@@ -486,4 +642,9 @@
 
   });
 
-})(Two);
+})(
+  Two,
+  typeof require === 'function' ? require('underscore') : _,
+  typeof require === 'function' ? require('backbone') : Backbone,
+  typeof require === 'function' ? require('requestAnimationFrame') : requestAnimationFrame
+);
